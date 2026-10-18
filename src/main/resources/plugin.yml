@@ -1,0 +1,22 @@
+name: BotByMaroneya
+version: beta-26.2
+main: com.botarmy.BotArmyPlugin
+api-version: '26.2'
+depend: [Citizens]
+description: Bot by maroneya - fake-player bot army (patrol / attack / retreat)
+authors: [maroneya]
+commands:
+  bot:
+    description: Open the bot kit menu / freeze / change mode
+    usage: /bot | /bot macex | /bot frozen | /bot mode <auto|patrol|attack> | /bot kill <player>
+    permission: botarmy.admin
+  debot:
+    description: Remove all bots
+    usage: /debot
+    permission: botarmy.admin
+permissions:
+  botarmy.admin:
+    default: op
+  botarmy.ignore:
+    description: Bots will not target this player
+    default: false
