@@ -75,6 +75,13 @@ public final class ArmyBot {
     int slot;
 
     private Combo combo = Combo.NONE;
+    /** คอมโบนี้เริ่มจากปีก → ทุบเสร็จสลับกลับเป็นปีกบินขึ้นทุบวนซ้ำ */
+    private boolean glideMode;
+    /** ขวานเพิ่งทุบโล่แตก → ต่อค้อน Wind Burst ภายในเวลานี้ / เพิร์ลวาร์ปถึงตัวศัตรู → ลอยตัวทุบ */
+    private long postAxeUntil, pearlSmashUntil, pearlThrownAt;
+    private boolean pearlForSmash;
+    /** จำนวนครั้งที่ลองบินใหม่เมื่อลงพื้นแล้วยังทุบไม่โดน (ศัตรูอยู่ในหลุม/หลบ) */
+    private int relaunch;
     private boolean shieldUp, eating, jumpPending;
     private long shieldDownUntil, shieldDisabledUntil, shieldHoldUntil;
     private long nextGappleAt, nextPearlAt, nextComboAt, eatEndsAt, lastEatSound, comboStart;
@@ -182,6 +189,13 @@ public final class ArmyBot {
         cartFleeUntil = 0;
         crystalBusyUntil = 0;
         jumpPending = false;
+        glideMode = false;
+        savedChest = null;
+        savedOffhand = null;
+        postAxeUntil = 0;
+        pearlSmashUntil = 0;
+        pearlForSmash = false;
+        relaunch = 0;
         respawnAt = 0;
         hadSpawned = true;
         return true;
@@ -557,18 +571,59 @@ public final class ArmyBot {
         double dist = bl.distance(el);
         boolean ground = onGround(p);
 
-        // ---- ท่าไม้ตาย (high / max)
-        if (ground && now >= nextComboAt && !eating) {
-            if (spec.elytra && kit.elytra != null && dist >= 20 && dist <= 80) {
-                startGlide(p, enemy, now);
-                return;
+        // ---- ท่าไม้ตายของค้อน (ต้องยืนบนพื้นและไม่ได้กินแอปเปิลอยู่)
+        if (ground && !eating && spec.mace && spec.wind) {
+            // (1) ขวานเพิ่งทุบโล่แตก → ต่อค้อน Density + Wind Burst ทันที (ศัตรูยกโล่ไม่ได้ ~5 วิ)
+            if (postAxeUntil > 0) {
+                boolean go = now <= postAxeUntil && p.getHealth() > 6 && !enemy.isDead();
+                postAxeUntil = 0;
+                if (go) {
+                    startRise(p, enemy, now);
+                    return;
+                }
             }
-            // ท่าลอยตัวทุบ: ไม่ใช้ถ้าศัตรูยกโล่ (ให้ขวานตัดโล่ก่อน), เลือดตัวเองต่ำ, หรือศัตรูใกล้ตาย (ตีธรรมดาจบเร็วกว่า)
-            boolean smart = !enemy.isBlocking() && p.getHealth() > 8
-                    && (enemy.getHealth() > 8 || dist > 5);
-            if (spec.mace && spec.wind && smart && dist >= 3.5 && dist <= 18 && rnd.nextDouble() < spec.comboChance) {
-                startRise(p, enemy, now);
-                return;
+            // (2) เพิร์ลวาร์ปมาถึงตัวศัตรูแล้ว → Wind Charge ลอยตัวทุบจากฟ้า
+            if (pearlSmashUntil > 0) {
+                boolean go = now <= pearlSmashUntil && p.getHealth() > 6 && !enemy.isDead();
+                pearlSmashUntil = 0;
+                if (go) {
+                    startRise(p, enemy, now);
+                    return;
+                }
+            }
+        }
+        if (ground && !eating && p.getHealth() > 8) {
+            boolean macer = spec.mace && spec.wind;
+            // ศัตรูอยู่ต่ำกว่า (ยืนในหลุม/ร่อง) เดินเข้าไปตีไม่ได้ → ต้องบินทุบจากข้างบนเสมอ
+            boolean pit = macer && el.getY() <= bl.getY() - 1.5 && dist <= 16;
+            boolean cdOk = now >= nextComboAt || (pit && now - comboStart >= 24);
+            if (cdOk) {
+                // ปีกบินสลับเกราะทุบ (วนซ้ำ) — ไกลพอถึงจะบิน
+                if (spec.elytra && kit.elytra != null && dist >= 20 && dist <= 80 && rnd.nextDouble() < 0.6) {
+                    startGlide(p, enemy, now);
+                    return;
+                }
+                // เพิร์ล + Wind Charge: ปาเพิร์ลวาร์ปไปหาศัตรูแล้วลอยตัวทุบ
+                if (macer && spec.canPearl() && pearls > 0 && now >= nextPearlAt && dist >= 9 && dist <= 40
+                        && spec.comboChance >= 0.5 && rnd.nextDouble() < spec.comboChance * 0.5) {
+                    if (throwPearl(p, el.clone(), now)) {
+                        pearlForSmash = true;
+                        pearlThrownAt = now;
+                        nextComboAt = now + 40;
+                        return;
+                    }
+                }
+                if (spec.elytra && kit.elytra != null && dist >= 20 && dist <= 80) {
+                    startGlide(p, enemy, now);
+                    return;
+                }
+                // ลอยตัวทุบ: ไม่ใช้ถ้าศัตรูยกโล่ (ให้ขวานตัดโล่ก่อน), หรือศัตรูใกล้ตาย (ตีธรรมดาจบเร็วกว่า)
+                boolean smart = !enemy.isBlocking() && (enemy.getHealth() > 8 || dist > 5 || pit);
+                double chance = pit ? 1.0 : spec.comboChance;
+                if (macer && smart && dist >= 1.5 && dist <= 22 && rnd.nextDouble() < chance) {
+                    startRise(p, enemy, now);
+                    return;
+                }
             }
         }
 
@@ -586,7 +641,13 @@ public final class ArmyBot {
         // ---- ปาเพิร์ลเข้าประชิด
         double pearlMin = spec.shield >= 3 ? 14 : 18; // ระดับสูงไล่ตามคนวิ่งหนีเก่งกว่า
         if (spec.canPearl() && pearls > 0 && now >= nextPearlAt && ground && dist >= pearlMin && dist <= 45 && !eating) {
-            if (throwPearl(p, el.clone(), now)) return;
+            if (throwPearl(p, el.clone(), now)) {
+                if (spec.mace && spec.wind) {
+                    pearlForSmash = true; // วาร์ปถึงแล้วลอยตัวทุบต่อ
+                    pearlThrownAt = now;
+                }
+                return;
+            }
         }
 
         // ---- CPVP: วางคริสตัล / CUTPVP: วางรถระเบิด + ยิงธนูไฟ
@@ -697,6 +758,7 @@ public final class ArmyBot {
         }
         double dmg;
         boolean shielded = t.isBlocking();
+        boolean brokeShield = false;
         if (w == Weapon.AXE) {
             dmg = baseDamage(Material.NETHERITE_AXE) + 0.5 * (spec.axeSharp + 1);
             if (shielded) {
@@ -704,12 +766,18 @@ public final class ArmyBot {
                 clearActive(t);
                 t.getWorld().playSound(t.getLocation(), Sound.ITEM_SHIELD_BREAK, 1f, 1f);
                 shielded = false;
+                brokeShield = true;
             }
         } else {
             dmg = baseDamage(spec.swordMat) + 0.5 * (spec.sharp + 1);
         }
         if (crit) dmg *= 1.5;
         t.damage(dmg, p);
+        // ขวานทุบโล่แตก → ต่อด้วยค้อน Density + Wind Burst ทันที
+        if (brokeShield && spec.mace && spec.wind && !spec.axeOnly
+                && rnd.nextDouble() < Math.min(1.0, spec.comboChance + 0.35)) {
+            postAxeUntil = now + 30;
+        }
         if (spec.fireAspect && w == Weapon.SWORD) t.setFireTicks(Math.max(t.getFireTicks(), 80));
         // W-tap: แรงสะบัดเพิ่มตอนตีโดน (ระดับยาก) ไม่เพิ่มถ้าเป้ายกโล่กันอยู่
         if (spec.kb > 0 && !shielded && t.isValid() && !t.isDead()) {
@@ -914,6 +982,10 @@ public final class ArmyBot {
         combo = Combo.RISING;
         comboStart = now;
         chain = 0;
+        relaunch = 0;
+        glideMode = false;
+        jumpPending = false;
+        postAxeUntil = 0;
         peakY = p.getLocation().getY();
         lowerShield(p);
         cancelNav();
@@ -932,16 +1004,61 @@ public final class ArmyBot {
         combo = Combo.GLIDE;
         comboStart = now;
         chain = 0;
+        relaunch = 0;
+        glideMode = true;
+        jumpPending = false;
+        postAxeUntil = 0;
         peakY = p.getLocation().getY();
         lowerShield(p);
         cancelNav();
-        savedChest = p.getInventory().getChestplate();
-        p.getInventory().setChestplate(kit.elytra); // สลับเกราะ → ปีก
-        p.getWorld().playSound(p.getLocation(), Sound.ITEM_ARMOR_EQUIP_ELYTRA, 1f, 1f);
+        swapToElytra(p);
         p.setVelocity(new Vector(0, spec.boost * 1.1, 0));
         windFx(p);
         selectSlot(p, S_WIND);
-        nextComboAt = now + 80;
+        nextComboAt = now + Math.min(80, spec.comboCd + 20);
+    }
+
+    /** สลับเกราะ → ปีก (จำเกราะเดิมไว้สลับกลับ) */
+    private void swapToElytra(Player p) {
+        if (savedChest == null) {
+            ItemStack cur = p.getInventory().getChestplate();
+            savedChest = (cur == null || cur.getType() == Material.ELYTRA) ? kit.chest.clone() : cur;
+        }
+        p.getInventory().setChestplate(kit.elytra);
+        p.getWorld().playSound(p.getLocation(), Sound.ITEM_ARMOR_EQUIP_ELYTRA, 1f, 1f);
+    }
+
+    /** สลับปีก → เกราะ (กลางอากาศ) */
+    private void swapToChest(Player p) {
+        if (p.isGliding()) p.setGliding(false);
+        if (savedChest != null) {
+            p.getInventory().setChestplate(savedChest);
+            savedChest = null;
+            p.getWorld().playSound(p.getLocation(), Sound.ITEM_ARMOR_EQUIP_NETHERITE, 1f, 1f);
+        }
+    }
+
+    /** เด้งตัวขึ้นด้วย Wind Burst แล้วทุบซ้ำ */
+    private void riseAgain(Player p, long now, double mul) {
+        combo = Combo.RISING;
+        comboStart = now;
+        peakY = p.getLocation().getY();
+        p.setVelocity(new Vector(0, spec.boost * mul, 0));
+        selectSlot(p, S_WIND);
+        windFx(p);
+        nextComboAt = now + 30;
+    }
+
+    /** ทุบเสร็จ → สลับกลับเป็นปีก บินขึ้นสูงใหม่แล้วสลับเกราะทุบซ้ำ */
+    private void glideAgain(Player p, long now) {
+        combo = Combo.GLIDE;
+        comboStart = now;
+        peakY = p.getLocation().getY();
+        swapToElytra(p);
+        p.setVelocity(new Vector(0, spec.boost * 1.15, 0));
+        selectSlot(p, S_WIND);
+        windFx(p);
+        nextComboAt = now + 30;
     }
 
     private void tickCombo(Player p, Player e, long now) {
@@ -970,13 +1087,9 @@ public final class ArmyBot {
                 }
                 if (age >= 6 && age % 8 == 0) bl.getWorld().spawnParticle(Particle.FIREWORK, bl, 6, 0.2, 0.2, 0.2, 0.02);
                 double hd = Math.hypot(eloc.getX() - bl.getX(), eloc.getZ() - bl.getZ());
-                if (hd < 10 || age > 100) {
-                    p.setGliding(false);
-                    if (savedChest != null) {
-                        p.getInventory().setChestplate(savedChest); // สลับกลับเป็นเกราะกลางอากาศ
-                        savedChest = null;
-                        bl.getWorld().playSound(bl, Sound.ITEM_ARMOR_EQUIP_NETHERITE, 1f, 1f);
-                    }
+                boolean high = bl.getY() >= eloc.getY() + 6;
+                if ((hd < 10 && high) || age > 100) {
+                    swapToChest(p); // สลับกลับเป็นเกราะกลางอากาศ
                     combo = Combo.DIVE;
                     comboStart = now - 4;
                     selectSlot(p, maceSlot());
@@ -991,24 +1104,33 @@ public final class ArmyBot {
                 double fall = Math.max(0, peakY - bl.getY());
                 p.setFallDistance((float) fall);
                 Location chest = eloc.clone().add(0, 0.9, 0);
-                if (fall > 1.5 && bl.clone().add(0, 0.9, 0).distanceSquared(chest) <= 3.3 * 3.3) {
+                double d2 = bl.clone().add(0, 0.9, 0).distanceSquared(chest);
+                boolean landed = ground && age > 3;
+                // ทุบเมื่อเข้าระยะ (ลงพื้นแล้วก็ให้ระยะกว้างขึ้นหน่อย เผื่อศัตรูยืนในหลุม/ข้างตัว)
+                if (fall > 1.5 && (d2 <= 3.3 * 3.3 || (landed && d2 <= 4.3 * 4.3))) {
                     smash(p, e, fall, now);
-                    // MAX: Wind Burst เด้งตัวขึ้นแล้วทุบซ้ำเป็นสายพาน (สูงสุด 3 ครั้ง) ถ้าเป้ายังไม่ตาย
+                    // ทุบแล้วเป้ายังไม่ตาย → ต่อคอมโบ (ปีก: สลับปีกบินทุบวนซ้ำ / ปกติ: Wind Burst เด้งทุบซ้ำ)
                     if (chain < spec.chainMax && e.isValid() && !e.isDead() && e.getHealth() > 0) {
                         chain++;
-                        combo = Combo.RISING;
-                        comboStart = now;
-                        peakY = bl.getY();
-                        p.setVelocity(new Vector(0, spec.boost * 1.15, 0));
-                        windFx(p);
-                        nextComboAt = now + 30;
+                        relaunch = 0;
+                        if (glideMode && kit.elytra != null) glideAgain(p, now);
+                        else riseAgain(p, now, 1.15);
                     } else {
                         chain = 0;
                         endCombo(p);
                     }
                     return;
                 }
-                if (ground && age > 8) endCombo(p);
+                if (ground && age > 8) {
+                    // ลงพื้นแล้วยังทุบไม่โดน (ศัตรูอยู่ในหลุม/ขยับหนี) → บินใหม่ ไม่ยอมแพ้ง่ายๆ
+                    double flat = Math.hypot(eloc.getX() - bl.getX(), eloc.getZ() - bl.getZ());
+                    if (spec.wind && relaunch < 3 && flat <= 9 && !e.isDead() && p.getHealth() > 6) {
+                        relaunch++;
+                        riseAgain(p, now, 1.1);
+                    } else {
+                        endCombo(p);
+                    }
+                }
             }
             default -> {
             }
@@ -1018,6 +1140,8 @@ public final class ArmyBot {
     private void endCombo(Player p) {
         if (combo == Combo.NONE) return;
         combo = Combo.NONE;
+        glideMode = false;
+        relaunch = 0;
         if (p.isGliding()) p.setGliding(false);
         if (savedChest != null) {
             p.getInventory().setChestplate(savedChest);
@@ -1406,6 +1530,10 @@ public final class ArmyBot {
         npc.teleport(dest, PlayerTeleportEvent.TeleportCause.ENDER_PEARL);
         navLast = null;
         navEntity = null;
+        if (pearlForSmash) {
+            pearlForSmash = false;
+            if (mgr.now() - pearlThrownAt < 200) pearlSmashUntil = mgr.now() + 24;
+        }
         double dmg = mgr.plugin().getConfig().getDouble("pearl-fall-damage", 5.0);
         if (dmg > 0) p.damage(dmg);
         dest.getWorld().playSound(dest, Sound.ENTITY_PLAYER_TELEPORT, 1f, 1f);
@@ -1436,6 +1564,7 @@ public final class ArmyBot {
                 away.normalize().multiply(22);
                 Location dest = bl.clone().add(away);
                 dest = mgr.safeGround(dest);
+                pearlForSmash = false; // เพิร์ลหนี ไม่ใช่เพิร์ลเข้าหาแล้วทุบ
                 if (throwPearl(p, dest, now)) return;
             }
         }

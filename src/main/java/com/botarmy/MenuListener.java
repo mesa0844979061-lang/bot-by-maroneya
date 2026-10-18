@@ -45,9 +45,21 @@ public final class MenuListener implements Listener {
         int slot = e.getRawSlot();
         if (slot < 0 || slot >= BotMenu.SIZE) return;
 
+        m.frozen = mgr.isFrozen(); // ซิงก์สถานะแช่ล่าสุด (เผื่อมีคนใช้ /bot frozen ระหว่างเปิดเมนู)
         BotMenu.Result r = m.click(slot);
         switch (r) {
             case CHANGED -> p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.6f, 1.2f);
+            case FROZEN -> {
+                if (!p.hasPermission("botarmy.admin")) {
+                    plugin.msg(p, "&cคุณไม่มีสิทธิ์ใช้คำสั่งนี้");
+                    return;
+                }
+                boolean f = mgr.toggleFrozen();
+                m.frozen = f;
+                m.render();
+                p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.6f, f ? 0.8f : 1.4f);
+                plugin.msg(p, f ? "&b❄ แช่บอททั้งหมดแล้ว (ถือโทเทมสแตก 99)" : "&a🔥 ปลดแช่บอทแล้ว");
+            }
             case CANCEL -> {
                 m.consumed = true;
                 Bukkit.getScheduler().runTask(plugin, () -> {

@@ -21,7 +21,7 @@ import java.util.UUID;
  */
 final class BotMenu implements InventoryHolder {
 
-    enum Result { NONE, CHANGED, CONFIRM, CANCEL }
+    enum Result { NONE, CHANGED, CONFIRM, CANCEL, FROZEN }
 
     static final int SIZE = 54;
     static final int[] KIT_SLOTS = {10, 11, 12, 13, 14, 15, 16};
@@ -30,6 +30,8 @@ final class BotMenu implements InventoryHolder {
     static final int[] COUNT_SLOTS = {37, 38, 39, 40, 41, 42, 43};
     static final int[] COUNTS = {1, 5, 10, 15, 20, 30, 50};
     static final int CONFIRM = 48, CANCEL = 50;
+    /** ปุ่มแช่/ปลดแช่บอททั้งหมด (กดแล้วมีผลทันที เหมือน /bot frozen) */
+    static final int FROZEN = 25;
 
     final UUID owner;
     private final Inventory inv;
@@ -39,11 +41,14 @@ final class BotMenu implements InventoryHolder {
     boolean totem = true;
     boolean stack99 = false;
     int count = 5;
+    /** สถานะแช่บอทตอนนี้ (BotManager เป็นคนกำหนด) */
+    boolean frozen;
     /** true = เมนูนี้ใช้งานจบแล้ว (กดยืนยัน/ยกเลิก/ปิด) คลิกที่เหลือจะถูกเมินทั้งหมด กันกดซ้ำเสกซ้ำ */
     boolean consumed;
 
-    BotMenu(UUID owner) {
+    BotMenu(UUID owner, boolean frozen) {
         this.owner = owner;
+        this.frozen = frozen;
         this.inv = Bukkit.createInventory(this, SIZE, txt("&8Bot by maroneya &7• &8เลือกชุดบอท"));
     }
 
@@ -95,6 +100,9 @@ final class BotMenu implements InventoryHolder {
                 totem = true;    // สแตก 99 ต้องถือโทเทม
             }
             case STACK_NO -> stack99 = false;
+            case FROZEN -> {
+                return Result.FROZEN; // ให้ MenuListener สลับสถานะจริงที่ BotManager แล้วค่อยวาดเมนูใหม่
+            }
             case CONFIRM -> {
                 return Result.CONFIRM;
             }
@@ -161,11 +169,17 @@ final class BotMenu implements InventoryHolder {
                     List.of("&8จำนวนบอทที่จะเสก", "", sel ? "&a✔ เลือกอยู่" : "&eคลิกเพื่อเลือก")));
         }
 
+        inv.setItem(FROZEN, item(frozen ? Material.BLUE_ICE : Material.PACKED_ICE, 1,
+                (frozen ? "&b&l❄ Frozen: เปิดอยู่" : "&e❄ Frozen: ปิดอยู่"), frozen,
+                List.of("&8แช่บอททั้งหมด", "&7บอททุกตัวหยุดนิ่ง ถือโทเทมสแตก 99", "&7(มีผลกับบอทที่มีอยู่และที่เสกใหม่ทันที)", "",
+                        frozen ? "&aคลิกเพื่อปลดแช่" : "&eคลิกเพื่อแช่บอททั้งหมด")));
+
         inv.setItem(CONFIRM, item(Material.LIME_DYE, 1, "&a&l✔ เสกบอท", false, List.of(
                 "&7ชุด: &f" + kit.display,
                 "&7ระดับ: &f" + diff.display,
                 "&7โทเทม: &f" + (stack99 ? "สแตก 99" : totem ? "ถือ" : "ไม่ถือ"),
                 "&7จำนวน: &f" + count,
+                "&7Frozen: &f" + (frozen ? "เปิด (บอทจะนิ่ง)" : "ปิด"),
                 "",
                 "&aคลิกเพื่อเสกบอท")));
         inv.setItem(CANCEL, item(Material.RED_DYE, 1, "&c&l✖ ยกเลิก", false, List.of("&7ปิดเมนูโดยไม่เสก")));

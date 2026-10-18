@@ -30,7 +30,7 @@ public final class BotCommand implements CommandExecutor, TabCompleter {
 
         if (a.length == 0 || a[0].equalsIgnoreCase("menu")) {
             if (s instanceof Player p) {
-                new BotMenu(p.getUniqueId()).open(p);
+                new BotMenu(p.getUniqueId(), mgr.isFrozen()).open(p);
             } else {
                 help(s);
             }
@@ -119,7 +119,7 @@ public final class BotCommand implements CommandExecutor, TabCompleter {
 
     private void help(CommandSender s) {
         plugin.msg(s, "&e/bot &7- เปิดเมนูเลือกชุดบอท (CPVP / CUTPVP / SMP / FFA / UHC / AXE PVP / MACE PVP)");
-        plugin.msg(s, "&e/bot frozen &7- แช่/ปลดแช่บอท (ถือโทเทมสแตก 99)");
+        plugin.msg(s, "&e/bot frozen &7- แช่/ปลดแช่บอท (ถือโทเทมสแตก 99) — มีปุ่มในเมนู /bot ด้วย");
         plugin.msg(s, "&e/bot macex &7- เสกบอทค้อน MACE ฝีมือระดับโลก 1 ตัว");
         plugin.msg(s, "&e/bot mode <auto|patrol|attack> &7- บังคับโหมดกองทัพ");
         plugin.msg(s, "&e/bot kill <ชื่อผู้เล่น> &7- สั่งบอทรุมผู้เล่น (เกิน 2 ตัว แบ่งครึ่งไปรุม)");
